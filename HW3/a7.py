@@ -88,16 +88,38 @@ for i,ax in enumerate(axes):
     
 # part e
 imageInds = (5,13,15) # indices for images of the digits 2,6,7 resp.
+digitInds = [1,3,5,7,9,11,13,15,17,22]
 
-for imageInd in imageInds:
+for imageInd in digitInds:
     image = X_train[None,imageInd]
     
-    reconstrList = [image.reshape(28,28),]
-    for k in (5,15,40,100):
+    # reconstrList = [image.reshape(28,28),]
+    reconstrList = []
+    #for k in (5,15,40,100):
+    for k in (32,64,128):
         reconstr,MSE = changeBasis(image, np.real(V[:,:k]))
         reconstrList.append(reconstr.reshape(28,28))
         
-    fig,axes = plt.subplots(1,5)
+    fig,axes = plt.subplots(1,3)
+    axes = np.array(axes).flatten()
+    for i,ax in enumerate(axes):
+        ax.imshow(reconstrList[i],cmap='Greys')
+        
+imageInds = (5,13,15) # indices for images of the digits 2,6,7 resp.
+digitInds = [1,3,5,7,9,11,13,15,17,22]
+
+for k in (32,64,128):
+    
+    # reconstrList = [image.reshape(28,28),]
+    reconstrList = []
+    #for k in (5,15,40,100):
+    for imageInd in digitInds:
+        image = X_train[None,imageInd]
+        reconstr,MSE = changeBasis(image, np.real(V[:,:k]))
+        reconstrList.append(reconstr.reshape(28,28))
+        
+    fig,axes = plt.subplots(2,5)
+    fig.suptitle('PCA Reconstruction of MNIST Digits with k={}'.format(k))
     axes = np.array(axes).flatten()
     for i,ax in enumerate(axes):
         ax.imshow(reconstrList[i],cmap='Greys')
