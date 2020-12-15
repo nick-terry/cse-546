@@ -146,7 +146,7 @@ def lossFn(U,V,lambda_reg,ref=train):
         U = t.tensor(U)
         V = t.tensor(V)
     
-    Rhat = V.matmul(U.T)
+    Rhat = U @ V.T
     
     loss = error(Rhat,ref) + lambda_reg * (t.sum(t.norm(U,dim=0)**2) + t.sum(t.norm(V,dim=0)**2))
     
@@ -198,6 +198,72 @@ def alternatingMin(d,sigma,lambda_reg):
 
     return U,V,trainMSE,testMSE
 
+def alternatingMin2(d,sigma,lambda_reg):
+    
+    print('d={}'.format(d))
+    
+    U = sigma*np.random.rand(num_items,d)
+    V = sigma*np.random.rand(num_users,d)
+
+    # iteratively minimize loss until loss converges
+    _loss = 999999
+    delta = 999999
+    while np.abs(delta) > 1:
+        
+        # define some helper functions
+        get_j = lambda j : train[:,0]==j
+        get_i = lambda i : train[:,1]==i
+        
+        A_array = np.zeros((num_items,d,d))
+        B_array = np.zeros((num_items,d))
+        for i in range(num_items):
+            
+            idx = get_i(i)
+
+            RV = train[idx,2,None]*V[train[idx,0]]
+            
+            # compute sum of outer product of rows of V plus diagonal regularization matrix
+            A = np.sum(V[train[idx,0],:,None]*V[train[idx,0],None],axis=0) + lambda_reg*np.eye(d)
+            B = np.sum(RV,axis=0)
+            
+            A_array[i] = A
+            B_array[i] = B.T
+            
+        # solve for U which minimizes loss for fixed V
+        U = np.linalg.solve(A_array,B_array)
+            
+        A_array = np.zeros((num_users,d,d))
+        B_array = np.zeros((num_users,d))
+        for j in range(num_users):
+            
+            idx = get_j(j)
+            
+            RU = train[idx,2,None]*U[train[idx,1]]
+            
+            # compute sum of outer product of rows of U plus diagonal regularization matrix
+            A = np.sum(U[train[idx,1],:,None]*U[train[idx,1],None],axis=0) + lambda_reg*np.eye(d)
+            B = np.sum(RU,axis=0)
+            
+            A_array[j] = A
+            B_array[j] = B.T
+            
+        # solve for V which minimizes loss for fixed U
+        V = np.linalg.solve(A_array,B_array)
+    
+        # compute the loss
+        loss = lossFn(U,V,lambda_reg)
+        
+        # compute change in loss
+        delta = loss - _loss
+        _loss = loss
+        print('Loss: {}'.format(loss))
+        
+    # compute MSE
+    Rhat = U @ V.T
+    trainMSE,testMSE = error(Rhat,train),error(Rhat,test)
+
+    return U,V,trainMSE,testMSE
+
 # part c
 def c(sigma,lambda_reg):
     
@@ -210,7 +276,7 @@ def c(sigma,lambda_reg):
     # R = getMaskedTrainMatrix()
     for d in dVals:
     
-        U,V,trainMSE,testMSE = alternatingMin(d, sigma, lambda_reg)
+        U,V,trainMSE,testMSE = alternatingMin2(d, sigma, lambda_reg)
             
         UList.append(U)
         VList.append(V)
@@ -226,7 +292,7 @@ def c(sigma,lambda_reg):
     return UList,VList,trainErrList,testErrList
 
 # This is broken. The closed form solution appears to be incorrect.
-UList,VList,trainErrList,testErrList = c(sigma=1,lambda_reg=.5) 
+UList,VList,trainErrList,testErrList = c(sigma=1,lambda_reg=.2) 
 
 # part d
 
