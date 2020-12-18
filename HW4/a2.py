@@ -134,6 +134,16 @@ def c(nnA,nnB):
     
     return errorA,errorB
 
+# show the digits
+fig,axes = plt.subplots(2,5)
+fig.suptitle('MNIST Digits (Training Data)')
+_axes = []
+for item in axes:
+    _axes += list(item)
+for i,ax in enumerate(_axes):
+    ax.imshow(digits[i].reshape((28,28)),cmap='Greys')
+    ax.set_title('Digit: {}'.format(i))
+
 torch.manual_seed(42)
 resultsA = a()
 resultsB = b()

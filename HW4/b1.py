@@ -148,57 +148,11 @@ def lossFn(U,V,lambda_reg,ref=train):
     
     Rhat = U @ V.T
     
-    loss = error(Rhat,ref) + lambda_reg * (t.sum(t.norm(U,dim=0)**2) + t.sum(t.norm(V,dim=0)**2))
+    loss = error(Rhat,ref) + lambda_reg * (t.sum(t.norm(U,dim=1)**2) + t.sum(t.norm(V,dim=1)**2))
     
     return loss
 
 def alternatingMin(d,sigma,lambda_reg):
-    
-    print('d={}'.format(d))
-    
-    U = sigma*np.random.rand(num_users,d)
-    V = sigma*np.random.rand(num_items,d)
-
-    # iteratively minimize loss until loss converges
-    _loss = 999999
-    delta = 999999
-    while np.abs(delta) > 1:
-        
-        # define some helper functions
-        RV = train[:,2,None]*V[train[:,1]]
-        RU = train[:,2,None]*U[train[:,0]]
-        get_j = lambda i : np.sum(RV[train[:,0]==i],axis=0)
-        get_i = lambda j : np.sum(RU[train[:,1]==j],axis=0)
-        
-        # compute sum of outer product of rows of V plus diagonal regularization matrix
-        A = np.sum(V[train[:,1],:,None]*V[train[:,1],None],axis=0) + lambda_reg*np.eye(d)
-        B = np.stack([get_j(i) for i in range(num_users)])
-        
-        # solve for U which minimizes loss for fixed V
-        U = np.linalg.solve(A,B.T).T
-        
-        # compute sum of outer product of rows of V plus diagonal regularization matrix
-        A = np.sum(U[train[:,0],:,None]*U[train[:,0],None],axis=0) + lambda_reg*np.eye(d)
-        B = np.stack([get_i(j) for j in range(num_items)])
-        
-        # solve for V which minimizes loss for fixed U
-        V = np.linalg.solve(A,B.T).T
-    
-        # compute the loss
-        loss = lossFn(U,V,lambda_reg)
-        
-        # compute change in loss
-        delta = loss - _loss
-        _loss = loss
-        print('Loss: {}'.format(loss))
-        
-    # compute MSE
-    Rhat = V @ U.T
-    trainMSE,testMSE = error(Rhat,train),error(Rhat,test)
-
-    return U,V,trainMSE,testMSE
-
-def alternatingMin2(d,sigma,lambda_reg):
     
     print('d={}'.format(d))
     
@@ -207,8 +161,9 @@ def alternatingMin2(d,sigma,lambda_reg):
 
     # iteratively minimize loss until loss converges
     _loss = 999999
+    loss = _loss
     delta = 999999
-    while np.abs(delta) > 1:
+    while np.abs(delta) > 1e-3 * loss:
         
         # define some helper functions
         get_j = lambda j : train[:,0]==j
@@ -216,15 +171,16 @@ def alternatingMin2(d,sigma,lambda_reg):
         
         A_array = np.zeros((num_items,d,d))
         B_array = np.zeros((num_items,d))
+        
+        RV = train[:,2,None]*V[train[:,0]]
+        
         for i in range(num_items):
             
             idx = get_i(i)
-
-            RV = train[idx,2,None]*V[train[idx,0]]
             
             # compute sum of outer product of rows of V plus diagonal regularization matrix
             A = np.sum(V[train[idx,0],:,None]*V[train[idx,0],None],axis=0) + lambda_reg*np.eye(d)
-            B = np.sum(RV,axis=0)
+            B = np.sum(RV[idx],axis=0)
             
             A_array[i] = A
             B_array[i] = B.T
@@ -234,15 +190,16 @@ def alternatingMin2(d,sigma,lambda_reg):
             
         A_array = np.zeros((num_users,d,d))
         B_array = np.zeros((num_users,d))
+        
+        RU = train[:,2,None]*U[train[:,1]]
+        
         for j in range(num_users):
             
             idx = get_j(j)
             
-            RU = train[idx,2,None]*U[train[idx,1]]
-            
             # compute sum of outer product of rows of U plus diagonal regularization matrix
             A = np.sum(U[train[idx,1],:,None]*U[train[idx,1],None],axis=0) + lambda_reg*np.eye(d)
-            B = np.sum(RU,axis=0)
+            B = np.sum(RU[idx],axis=0)
             
             A_array[j] = A
             B_array[j] = B.T
@@ -276,7 +233,7 @@ def c(sigma,lambda_reg):
     # R = getMaskedTrainMatrix()
     for d in dVals:
     
-        U,V,trainMSE,testMSE = alternatingMin2(d, sigma, lambda_reg)
+        U,V,trainMSE,testMSE = alternatingMin(d, sigma, lambda_reg)
             
         UList.append(U)
         VList.append(V)
@@ -286,13 +243,14 @@ def c(sigma,lambda_reg):
     fig,ax = plt.subplots(1)
     ax.plot(dVals,trainErrList,label='Train Error')
     ax.plot(dVals,testErrList,label='Test Error')
+    ax.set_xlabel('d')
+    ax.set_ylabel('Error')
     ax.legend()
     ax.set_title('Iterative Minimization Losses')
         
     return UList,VList,trainErrList,testErrList
 
-# This is broken. The closed form solution appears to be incorrect.
-UList,VList,trainErrList,testErrList = c(sigma=1,lambda_reg=.2) 
+# UList,VList,trainErrList,testErrList = c(sigma=5,lambda_reg=.4) 
 
 # part d
 
@@ -306,11 +264,9 @@ def sgdMin(d, sigma, lambda_reg, batchSize, lr, beta, validation=False):
     
     extraData = _validation if validation else _test
     
-    # print('d={}'.format(d))
-    
     # randomly initialize U,V
-    U = t.tensor(sigma*np.random.rand(num_users,d))
-    V = t.tensor(sigma*np.random.rand(num_items,d))
+    U = t.tensor(sigma*np.random.rand(num_items,d))
+    V = t.tensor(sigma*np.random.rand(num_users,d))
     
     # need grad for optimization
     U.requires_grad = True
@@ -320,8 +276,12 @@ def sgdMin(d, sigma, lambda_reg, batchSize, lr, beta, validation=False):
     
     counter = 0
     _loss = t.tensor(999999)
-    delta = t.tensor(999999)
-    while t.abs(delta) > 1: 
+    loss = _loss
+    delta = t.tensor(999)
+    i = 0
+    deltaList = []
+    minLoss = 999999
+    while t.abs(t.tensor(delta)) > 1e-5 * loss:
     
         # check if we need to decay learn rate
         if counter > _train.size(0):
@@ -336,100 +296,95 @@ def sgdMin(d, sigma, lambda_reg, batchSize, lr, beta, validation=False):
         # compute gradient
         loss = lossFn(U,V,lambda_reg,ref=batch)
         loss.backward()
+
+        if loss < minLoss:
+            minLoss = loss
         
         # take a step
         with t.no_grad():
             U += - lr * U.grad
             V +=  - lr * V.grad
+
+        # zero gradients
+        U.grad.zero_()
+        V.grad.zero_()
         
         delta = loss - _loss
-        # print('loss: {}'.format(loss))
+        deltaList.append(t.abs(delta))
+            
+        #print('loss: {}'.format(loss))
         _loss  = loss
         
         counter += batchSize
         
+        i += 1
+    
     # compute MSE
-    Rhat = V @ U.T
+    Rhat = U @ V.T
     trainMSE,extraMSE = error(Rhat,_train),error(Rhat,extraData)
     
     return U,V,trainMSE,extraMSE
 
-def d(dVals,sigma,lambda_reg,batchSize,lr,validation=False,plot=True):
+def d():
     
-    UList = []
-    VList = []
-    trainErrList = []
-    extraErrList = []
+    nPoints = 100
+    sigmaSpace = 3*t.rand(size=(nPoints,))
+    lambdaSpace = t.rand(size=(nPoints,))
+    # batchPoss = t.tensor([64,128,256,512,1024,2048])
+    # batchInd = t.randint(0,4,size=(nPoints,))
+    # batchSpace = batchPoss[batchInd]
+    batchSpace = t.randint(64,5096,size=(nPoints,))
+    lrSpace = t.randint(1,5,size=(nPoints,))
+    lrSpace = 10** -lrSpace.float()
+    betaSpace = .25*t.rand(size=(nPoints,)) + .75
+    paramSpaces = [list(space) for space in (sigmaSpace,lambdaSpace,batchSpace,lrSpace,betaSpace)]
+    paramCombList = list(zip(*paramSpaces))
+    dVals = (1,2,5,10,20,50)
     
-    # R = getMaskedTrainMatrix()
-    for d in dVals:
-    
-        U,V,trainMSE,extraMSE = sgdMin(d, sigma, lambda_reg, batchSize, lr, validation)
+    bestParamsList,bestTrainErrList,bestTestErrList = [],[],[]
+    for dVal in dVals:
+        
+        UList_d,VList_d,trainErrList_d,valErrList_d = [],[],[],[]
+        
+        for idx,params in enumerate(paramCombList):
             
-        UList.append(U)
-        VList.append(V)
-        trainErrList.append(trainMSE)
-        extraErrList.append(extraMSE)
-    
-    if plot:
+            U,V,trainErr,valErr = sgdMin(dVal,*params,validation=True)
+        
+            print('Done with param combination {} for d={}! Error is {}'.format(idx,dVal,valErr))    
+            
+            if not (t.isnan(valErr) or t.isnan(trainErr)):
+                trainErrList_d.append(trainErr.detach())
+                valErrList_d.append(valErr.detach())
+                UList_d.append(U)
+                VList_d.append(V)
+                
+        print('Done with d={}!'.format(dVal))
+            
+        # plot the test errors
         fig,ax = plt.subplots(1)
-        ax.plot(dVals,trainErrList,label='Train Error')
-        ax.plot(dVals,extraErrList,label='Test Error')
-        ax.legend()
-        ax.set_title('SGD Minimization Losses')
+        ax.violinplot(t.tensor(valErrList_d)[:,None].T)
+        ax.set_ylabel('Validation Error')
+        ax.set_title('Distribution of validation errors for random hyperparameter search\n d={}'.format(dVal))
         
-    return UList,VList,trainErrList,extraErrList
-
-# first do a random search for hyper params
-nPoints = 100
-sigmaSpace = t.rand(size=(nPoints,))
-lambdaSpace = t.rand(size=(nPoints,))
-# batchPoss = t.tensor([64,128,256,512,1024,2048])
-# batchInd = t.randint(0,4,size=(nPoints,))
-# batchSpace = batchPoss[batchInd]
-batchSpace = t.randint(64,5096,size=(nPoints,))
-lrSpace = t.randint(1,5,size=(nPoints,))
-lrSpace = 10** -lrSpace.float()
-betaSpace = .25*t.rand(size=(nPoints,)) + .75
-paramSpaces = [list(space) for space in (sigmaSpace,lambdaSpace,batchSpace,lrSpace,betaSpace)]
-paramCombList = list(zip(*paramSpaces))
-dVals = (1,2,5,10,20,50)
-
-bestParamsList,bestTrainErrList,bestTestErrList = [],[],[]
-for dVal in dVals:
-    
-    UList_d,VList_d,trainErrList_d,valErrList_d = [],[],[],[]
-    
-    for idx,params in enumerate(paramCombList):
+        bestParamsInd = t.argmin(t.tensor(valErrList_d))
+        bestParams = paramCombList[bestParamsInd]
+        bestParamsList.append(bestParams)
+        bestTrainErrList.append(trainErrList_d[bestParamsInd])
         
-        U,V,trainErr,valErr = sgdMin(dVal,*params,validation=True)
-    
-        print('Done with param combination {} for d={}!'.format(idx,dVal))    
-    
-        trainErrList_d.append(trainErr.detach())
-        valErrList_d.append(valErr.detach())
-    
-    print('Done with d={}!'.format(dVal))
+        # compute test error for the best parameters
+        U,V = UList_d[bestParamsInd],VList_d[bestParamsInd]
+        bestTestErrList.append(error(U @ V.T,_test))
         
-    # plot the test errors
     fig,ax = plt.subplots(1)
-    ax.violinplot(t.tensor(valErrList_d)[:,None].T)
-    ax.set_ylabel('Validation Error')
-    ax.set_title('Distribution of validation errors for random hyperparameter search\n d={}'.format(dVal))
+    ax.plot(dVals,bestTrainErrList,label='Train Error')
+    ax.plot(dVals,bestTestErrList,label='Test Error')
+    ax.set_xlabel('d')
+    ax.set_ylabel('Mean Squared Error')
+    ax.legend()
+    ax.set_title('SGD Minimization Losses')
     
-    bestParamsInd = t.argmin(t.tensor(valErrList_d))
-    bestParams = paramCombList[bestParamsInd]
-    bestParamsList.append(bestParams)
-    bestTrainErrList.append(trainErrList_d[bestParamsInd])
+    for dVal,params in zip(dVals,bestParamsList):
+        print('best params for d={}:'.format(dVal))
+        print(params)
     
-    # compute test error for the best parameters
-    bestTestErrList.append(error(V @ U.T,_test))
-    
-fig,ax = plt.subplots(1)
-ax.plot(dVals,bestTrainErrList,label='Train Error')
-ax.plot(dVals,bestTestErrList,label='Test Error')
-ax.set_xlabel('d')
-ax.set_ylabel('Mean Squared Error')
-ax.legend()
-ax.set_title('SGD Minimization Losses')
-
+d()
